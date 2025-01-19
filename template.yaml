@@ -1,0 +1,424 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  UserPoolName:
+    Type: String
+    Default: MyUserPool
+  IdentityPoolName:
+    Type: String
+    Default: MyIdentityPool
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /sam-app/ops
+      RetentionInDays: 7
+
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Ref UserPoolName
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      LambdaConfig:
+        PostConfirmation: !GetAtt TopicSubscriptionsFunction.Arn
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+      VerificationMessageTemplate:
+        DefaultEmailOption: CONFIRM_WITH_LINK
+        EmailSubject: "Welcome to My App! Please verify your email"
+        EmailMessage: |
+          Hello, {username}. Please verify your email address by clicking the link below: {####}
+
+  AdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Admins
+      UserPoolId: !Ref CognitoUserPool
+
+
+  AdminUser:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      DesiredDeliveryMediums:
+        - EMAIL
+      UserAttributes:
+        - Name: email
+          Value: kofi.gyawu@amalitech.com
+      Username: kofi.gyawu@amalitech.com
+      UserPoolId: !Ref CognitoUserPool
+
+  AddUserAdminToAdminGroup:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      GroupName: !Ref AdminGroup
+      Username: !Ref AdminUser
+
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: sam-app-test-123
+      UserPoolId: !Ref CognitoUserPool
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      ClientName: app-client
+      GenerateSecret: false
+      AllowedOAuthFlows:
+        - implicit
+      AllowedOAuthScopes:
+        - email
+        - openid
+        - profile
+      AllowedOAuthFlowsUserPoolClient: true
+      SupportedIdentityProviders:
+        - COGNITO
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      CallbackURLs:
+        - http://localhost:3000/callback
+
+  CognitoIdentityPool:
+    Type: AWS::Cognito::IdentityPool
+    Properties:
+      IdentityPoolName: !Ref IdentityPoolName
+      AllowUnauthenticatedIdentities: false
+      CognitoIdentityProviders:
+        - ClientId: !Ref UserPoolClient
+          ProviderName: !GetAtt CognitoUserPool.ProviderName
+
+  UserService:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: registerUser
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      Runtime: java17
+      CodeUri: .
+      MemorySize: 512
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminCreateUser
+              Resource: !GetAtt CognitoUserPool.Arn
+        - AWSLambdaBasicExecutionRole
+        - CloudWatchLambdaInsightsExecutionRolePolicy
+      Environment:
+        Variables:
+          MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
+          SPRING_CLOUD_DEFINITION: registerUser
+          COGNITO_USER_POOL_ID: !Ref CognitoUserPool
+          COGNITO_CLIENT_ID: !Ref UserPoolClient
+          LOG_LEVEL: INFO
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Path: /signup
+            Method: POST
+
+  TopicSubscriptionsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: subscribeUser
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      Runtime: java17
+      CodeUri: .
+      MemorySize: 512
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - CloudWatchLambdaInsightsExecutionRolePolicy
+        - Statement:
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource: !Ref TopicSubscriptionStateMachine
+      Environment:
+        Variables:
+          MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
+          SPRING_CLOUD_DEFINITION: subscribeUser
+          STATE_MACHINE_ARN: !Ref TopicSubscriptionStateMachine
+          TaskAssignmentNotificationTopic: !Ref TaskAssignmentNotificationTopic
+          TaskDeadlineNotificationTopic: !Ref TaskDeadlineNotificationTopic
+          ClosedTaskNotificationTopic: !Ref ClosedTaskNotificationTopic
+          ReopenedTasksNotificationTopic: !Ref ReopenedTasksNotificationTopic
+
+  TopicSubscriptionStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: workflow.asl.json
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Subscribe
+                - sns:GetTopicAttributes
+              Resource:
+                - !Ref TaskAssignmentNotificationTopic
+                - !Ref TaskDeadlineNotificationTopic
+                - !Ref ClosedTaskNotificationTopic
+                - !Ref ReopenedTasksNotificationTopic
+#      Policies:
+#        - SNSCrudPolicy:
+#            TopicName: !Sub $*Topic*
+
+  TaskAssignmentNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: TaskAssignmentNotificationTopic
+      Tags:
+        - Key: "Stack"
+          Value: !Sub "${AWS::StackName}"
+
+  TaskDeadlineNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: TaskDeadlineNotificationTopic
+      Tags:
+        - Key: "Stack"
+          Value: !Sub "${AWS::StackName}"
+
+  ClosedTaskNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: ClosedTaskNotificationTopic
+      Tags:
+        - Key: "Stack"
+          Value: !Sub "${AWS::StackName}"
+
+  ReopenedTasksNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: ReopenedTasksNotificationTopic
+      Tags:
+        - Key: "Stack"
+          Value: !Sub "${AWS::StackName}"
+
+# Task Service resources
+  TaskQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: TaskQueue
+
+  TaskTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: TaskTable
+      PrimaryKey:
+        Name: id
+        Type: Number
+
+  CommentTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: CommentTable
+      PrimaryKey:
+        Name: id
+        Type: Number
+
+#add authorizer
+  CreateTask:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: createTask
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      Runtime: java17
+      CodeUri: .
+      MemorySize: 512
+      Timeout: 30
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TaskTable
+      Environment:
+        Variables:
+          MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
+          TASK_TABLE: !Ref TaskTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Path: /task
+            Method: POST
+
+  ListTasks:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: listTasks
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      Runtime: java17
+      CodeUri: .
+      MemorySize: 512
+      Timeout: 30
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TaskTable
+      Environment:
+        Variables:
+          MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
+          TASK_TABLE: !Ref TaskTable
+          COMMENT_TABLE: !Ref CommentTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Path: /task
+            Method: GET
+
+  CompleteTask:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: completeTask
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      Runtime: java17
+      CodeUri: .
+      MemorySize: 512
+      Timeout: 30
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TaskTable
+      Environment:
+        Variables:
+          MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
+          TASK_TABLE: !Ref TaskTable
+          COMMENT_TABLE: !Ref CommentTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Path: /task/complete
+            Method: PATCH
+
+  ReassignTask:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: reassignTask
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      Runtime: java17
+      CodeUri: .
+      MemorySize: 512
+      Timeout: 30
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TaskTable
+      Environment:
+        Variables:
+          MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
+          TASK_TABLE: !Ref TaskTable
+          COMMENT_TABLE: !Ref CommentTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Path: /task/reassign
+            Method: PATCH
+
+  reopenTask:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: reopenTask
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      Runtime: java17
+      CodeUri: .
+      MemorySize: 512
+      Timeout: 30
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TaskTable
+      Environment:
+        Variables:
+          MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
+          TASK_TABLE: !Ref TaskTable
+          COMMENT_TABLE: !Ref CommentTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Path: /task/reopen
+            Method: PATCH
+
+  MakeComment:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: comment
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      Runtime: java17
+      CodeUri: .
+      MemorySize: 512
+      Timeout: 30
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CommentTable
+      Environment:
+        Variables:
+          MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
+          TASK_TABLE: !Ref TaskTable
+          COMMENT_TABLE: !Ref CommentTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Path: /task/comment
+            Method: POST
+
+  GetComments:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: getComments
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      Runtime: java17
+      CodeUri: .
+      MemorySize: 512
+      Timeout: 30
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CommentTable
+      Environment:
+        Variables:
+          MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
+          TASK_TABLE: !Ref TaskTable
+          COMMENT_TABLE: !Ref CommentTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Path: /task/comment
+            Method: GET
+
+Outputs:
+  UserApi:
+    Description: API Gateway endpoint URL
+    Value: !Sub https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/
+  UserService:
+    Description: Lambda Function ARN
+    Value: !GetAtt UserService.Arn
+  CognitoDomain:
+    Description: Url for cognito hosted login pages
+    Value: !Sub https://${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/login?client_id=${UserPoolClient}&redirect_uri=http://localhost:3000/callback&response_type=token

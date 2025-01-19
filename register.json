@@ -1,0 +1,37 @@
+{
+  "version": "2.0",
+  "routeKey": "POST /users/signup",
+  "rawPath": "/users/signup",
+  "rawQueryString": "",
+  "headers": {
+    "accept": "*/*",
+    "content-length": "76",
+    "content-type": "application/json",
+    "host": "api.example.com",
+    "user-agent": "curl/7.64.1",
+    "x-amzn-trace-id": "Root=1-61234567-abcdef0123456789",
+    "x-forwarded-for": "192.168.1.1",
+    "x-forwarded-port": "443",
+    "x-forwarded-proto": "https"
+  },
+  "requestContext": {
+    "accountId": "123456789012",
+    "apiId": "api-id-123",
+    "domainName": "api.example.com",
+    "domainPrefix": "api",
+    "http": {
+      "method": "POST",
+      "path": "/users/signup",
+      "protocol": "HTTP/1.1",
+      "sourceIp": "192.168.1.1",
+      "userAgent": "curl/7.64.1"
+    },
+    "requestId": "request-id-123",
+    "routeKey": "POST /users/signup",
+    "stage": "$default",
+    "time": "10/Jan/2023:12:00:00 +0000",
+    "timeEpoch": 1640995200000
+  },
+  "body": "{\"email\":\"baffourthe3rd@gmail.com\",\"password\":\"P@ssword1\"}",
+  "isBase64Encoded": false
+}

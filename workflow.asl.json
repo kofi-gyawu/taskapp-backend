@@ -1,0 +1,78 @@
+{
+  "Comment": "Subscribe user to SNS topics",
+  "StartAt": "Subscribe to Topic TaskAssignmentNotificationTopic",
+  "States": {
+    "Subscribe to Topic TaskAssignmentNotificationTopic": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:sns:subscribe",
+      "Parameters": {
+        "TopicArn.$": "$.topic1",
+        "Protocol": "email",
+        "Endpoint.$": "$.userEmail"
+      },
+      "Next": "Subscribe to Topic TaskDeadlineNotificationTopic",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "Handle Error"
+        }
+      ]
+    },
+    "Subscribe to Topic TaskDeadlineNotificationTopic": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:sns:subscribe",
+      "Parameters": {
+        "TopicArn.$": "$.topic2",
+        "Protocol": "email",
+        "Endpoint.$": "$.userEmail"
+      },
+      "Next": "Subscribe to Topic ClosedTaskNotificationTopic",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "Handle Error"
+        }
+      ]
+    },
+    "Subscribe to Topic ClosedTaskNotificationTopic": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:sns:subscribe",
+      "Parameters": {
+        "TopicArn.$": "$.topic3",
+        "Protocol": "email",
+        "Endpoint.$": "$.userEmail"
+      },
+      "Next": "Subscribe to Topic ReopenedTasksNotificationTopic",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "Handle Error"
+        }
+      ]
+    },
+    "Subscribe to Topic ReopenedTasksNotificationTopic": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:sns:subscribe",
+      "Parameters": {
+        "TopicArn.$": "$.topic4",
+        "Protocol": "email",
+        "Endpoint.$": "$.userEmail"
+      },
+      "Next": "Success",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "Handle Error"
+        }
+      ]
+    },
+    "Success": {
+      "Type": "Succeed"
+    },
+    "Handle Error": {
+      "Type": "Fail",
+      "Error": "SubscriptionError",
+      "Cause": "Failed to subscribe user to topic"
+    }
+  }
+}
