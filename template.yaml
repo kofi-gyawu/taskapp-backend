@@ -1,6 +1,11 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 
+Globals:
+  HttpApi:
+    Auth:
+      EnableIamAuthorizer: true
+
 Parameters:
   UserPoolName:
     Type: String
@@ -60,6 +65,21 @@ Resources:
       Username: kofi.gyawu@amalitech.com
       UserPoolId: !Ref CognitoUserPool
 
+  AdminClosedNotifications:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref ClosedTaskNotificationTopic
+      Endpoint: !Ref AdminUser
+      Protocol: email
+
+  AdminCompleteNotifications:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref TaskCompleteNotificationTopic
+      Endpoint: !Ref AdminUser
+      Protocol: email
+
+
   AddUserAdminToAdminGroup:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
@@ -104,6 +124,115 @@ Resources:
         - ClientId: !Ref UserPoolClient
           ProviderName: !GetAtt CognitoUserPool.ProviderName
 
+  AuthenticatedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                'cognito-identity.amazonaws.com:aud': !Ref CognitoIdentityPool
+              'ForAnyValue:StringLike':
+                'cognito-identity.amazonaws.com:amr': authenticated
+      Policies:
+        - PolicyName: AuthenticatedPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'execute-api:Invoke'
+                Resource:
+                  - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ServerlessHttpApi}/*/GET/task
+                  - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ServerlessHttpApi}/*/POST/task/comment
+                  - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ServerlessHttpApi}/*/GET/task/comment
+                  - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ServerlessHttpApi}/*/PATCH/task/complete
+
+  # IAM role for admin users
+  AdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                'cognito-identity.amazonaws.com:aud': !Ref CognitoIdentityPool
+              'ForAnyValue:StringLike':
+                'cognito-identity.amazonaws.com:amr': authenticated
+                'cognito-identity.amazonaws.com:groups': Admins
+      Policies:
+        - PolicyName: AdminPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'execute-api:Invoke'
+                Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ServerlessHttpApi}/*/*/*
+
+  IdentityPoolRoles:
+    Type: AWS::Cognito::IdentityPoolRoleAttachment
+    Properties:
+      IdentityPoolId: !Ref CognitoIdentityPool
+      Roles:
+        authenticated: !GetAtt AuthenticatedRole.Arn
+      RoleMappings:
+        "userpool":
+          Type: Token
+          AmbiguousRoleResolution: AuthenticatedRole
+          IdentityProvider: !Sub ${CognitoUserPool.ProviderName}:${UserPoolClient}
+          RulesConfiguration:
+            Rules:
+              - Claim: "cognito:groups"
+                MatchType: Contains
+                Value: "Admins"
+                RoleARN: !GetAtt AdminRole.Arn
+
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: getCredentials
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      Runtime: java17
+      CodeUri: .
+      MemorySize: 512
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:GetId
+                - cognito-idp:GetCredentialsForIdentity
+              Resource: arn:aws:cognito-identity:eu-central-1:122610498016:identitypool/eu-central-1:e8c0e26f-dbdc-4892-b742-f5895ca4766f
+        - AWSLambdaBasicExecutionRole
+        - CloudWatchLambdaInsightsExecutionRolePolicy
+      Environment:
+        Variables:
+          MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
+          SPRING_CLOUD_DEFINITION: getCredentials
+          COGNITO_USER_POOL_ID: !Ref CognitoUserPool
+          COGNITO_CLIENT_ID: !Ref UserPoolClient
+          IDENTITY_POOL_ID: !Ref CognitoIdentityPool
+          LOG_LEVEL: INFO
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Path: /auth
+            Method: POST
+
+
   UserService:
     Type: AWS::Serverless::Function
     Properties:
@@ -133,6 +262,8 @@ Resources:
         Api:
           Type: HttpApi
           Properties:
+            Auth:
+              Authorizer: AWS_IAM
             Path: /signup
             Method: POST
 
@@ -179,9 +310,6 @@ Resources:
                 - !Ref TaskDeadlineNotificationTopic
                 - !Ref ClosedTaskNotificationTopic
                 - !Ref ReopenedTasksNotificationTopic
-#      Policies:
-#        - SNSCrudPolicy:
-#            TopicName: !Sub $*Topic*
 
   TaskAssignmentNotificationTopic:
     Type: AWS::SNS::Topic
@@ -211,6 +339,14 @@ Resources:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: ReopenedTasksNotificationTopic
+      Tags:
+        - Key: "Stack"
+          Value: !Sub "${AWS::StackName}"
+
+  TaskCompleteNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: TaskCompleteNotificationTopic
       Tags:
         - Key: "Stack"
           Value: !Sub "${AWS::StackName}"
@@ -259,6 +395,8 @@ Resources:
         Api:
           Type: HttpApi
           Properties:
+            Auth:
+              Authorizer: AWS_IAM
             Path: /task
             Method: POST
 
@@ -284,6 +422,8 @@ Resources:
         Api:
           Type: HttpApi
           Properties:
+            Auth:
+              Authorizer: AWS_IAM
             Path: /task
             Method: GET
 
@@ -309,6 +449,8 @@ Resources:
         Api:
           Type: HttpApi
           Properties:
+            Auth:
+              Authorizer: AWS_IAM
             Path: /task/complete
             Method: PATCH
 
@@ -334,6 +476,8 @@ Resources:
         Api:
           Type: HttpApi
           Properties:
+            Auth:
+              Authorizer: AWS_IAM
             Path: /task/reassign
             Method: PATCH
 
@@ -359,8 +503,76 @@ Resources:
         Api:
           Type: HttpApi
           Properties:
+            Auth:
+              Authorizer: AWS_IAM
             Path: /task/reopen
             Method: PATCH
+
+  NotificationLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: notifyUsers
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      Runtime: java17
+      CodeUri: .
+      MemorySize: 512
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AWSLambdaSQSQueueExecutionRole
+      Environment:
+        Variables:
+          MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
+          SPRING_CLOUD_DEFINITION: subscribeUser
+          STATE_MACHINE_ARN: !Ref TopicSubscriptionStateMachine
+          TaskAssignmentNotificationTopic: !Ref TaskAssignmentNotificationTopic
+          TaskDeadlineNotificationTopic: !Ref TaskDeadlineNotificationTopic
+          ClosedTaskNotificationTopic: !Ref ClosedTaskNotificationTopic
+          ReopenedTasksNotificationTopic: !Ref ReopenedTasksNotificationTopic
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt TaskQueue.Arn
+            BatchSize: 1
+
+#
+#      Events:
+#        Api:
+#          Type: HttpApi
+#          Properties:
+#            Auth:
+#              Authorizer: AWS_IAM
+#            Path: /signup
+#            Method: POST
+
+  CheckDeadlines:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: checkDeadlines
+      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
+      Runtime: java17
+      CodeUri: .
+      MemorySize: 512
+      Timeout: 30
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TaskTable
+      Environment:
+        Variables:
+          MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
+          TASK_TABLE: !Ref TaskTable
+          COMMENT_TABLE: !Ref CommentTable
+      Events:
+        Schedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: 'rate(30 minutes)'
+            Name: CheckExpiredDeadlines
+
+
 
   MakeComment:
     Type: AWS::Serverless::Function
@@ -384,6 +596,8 @@ Resources:
         Api:
           Type: HttpApi
           Properties:
+            Auth:
+              Authorizer: AWS_IAM
             Path: /task/comment
             Method: POST
 
@@ -409,6 +623,8 @@ Resources:
         Api:
           Type: HttpApi
           Properties:
+            Auth:
+              Authorizer: AWS_IAM
             Path: /task/comment
             Method: GET
 

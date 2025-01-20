@@ -7,6 +7,6 @@ architecture = "x86_64"
 handler = "src/main/java/com.awsmicroservices.userservice::handleGet"
 manifest_hash = ""
 packagetype = "Zip"
-functions = ["UserService", "TopicSubscriptionsFunction", "CreateTask", "ListTasks", "CompleteTask", "ReassignTask", "reopenTask", "MakeComment", "GetComments"]
+functions = ["AuthFunction", "UserService", "TopicSubscriptionsFunction", "CreateTask", "ListTasks", "CompleteTask", "ReassignTask", "reopenTask", "CheckDeadlines", "MakeComment", "GetComments"]
 
 [layer_build_definitions]
