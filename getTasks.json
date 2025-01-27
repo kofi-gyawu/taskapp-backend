@@ -1,0 +1,38 @@
+{
+  "version": "2.0",
+  "routeKey": "GET /task",
+  "rawPath": "/users/signup",
+  "rawQueryString": "",
+  "headers": {
+    "accept": "*/*",
+    "content-length": "76",
+    "content-type": "application/json",
+    "host": "api.example.com",
+    "user-agent": "curl/7.64.1",
+    "x-amzn-trace-id": "Root=1-61234567-abcdef0123456789",
+    "x-forwarded-for": "192.168.1.1",
+    "x-forwarded-port": "443",
+    "x-forwarded-proto": "https",
+    "Authorization": "bearer eyJraWQiOiJJVVcxbjBBWjI0dGFpRE00K3YyVDY1aGJxVnM3aUdzZHBENFFtSldYQ1ZjPSIsImFsZyI6IlJTMjU2In0.eyJhdF9oYXNoIjoiUGtzb0ZLTHdkaFJNNm45S0lFemxLUSIsInN1YiI6IjUzZjQwODAyLWUwMDEtNzBmOS1hYWNlLTFlOTBmYTRjMjk4ZSIsImNvZ25pdG86Z3JvdXBzIjpbIkFkbWlucyJdLCJpc3MiOiJodHRwczpcL1wvY29nbml0by1pZHAuZXUtY2VudHJhbC0xLmFtYXpvbmF3cy5jb21cL2V1LWNlbnRyYWwtMV9sT1NiZHR5cEoiLCJjb2duaXRvOnVzZXJuYW1lIjoia29maS5neWF3dUBhbWFsaXRlY2guY29tIiwiYXVkIjoiMWNqYTdnYmxvZ2R0ZHNqaXVwb24yc21mNzEiLCJldmVudF9pZCI6IjE2ZGFkNzYyLTA3YzUtNGIwZi1hMjIyLTk4ODMxOGJhMzk4NyIsInRva2VuX3VzZSI6ImlkIiwiYXV0aF90aW1lIjoxNzM3MzU4MzI0LCJleHAiOjE3MzczNjE5MjQsImlhdCI6MTczNzM1ODMyNCwianRpIjoiNzg0MzZlOTUtNmE4Ny00OTk1LTliOTAtY2RhN2ZhNmJhOWZmIiwiZW1haWwiOiJrb2ZpLmd5YXd1QGFtYWxpdGVjaC5jb20ifQ.jZ_im7wnQu5yVjweeJCWXk0e9Vm4RZQmKJEC6ZE2CgKBa-EiM9zOqkkvJCyXFmFUH9QtsBrhxoLN6zEDUv5NAhRzZGllwoqoZjKLTYHX31lo2acXIWp0LwZDSekuFJhNGaQRajwBceyvzVfiEK7U6M1rBir883tjZT3yvpm6BUHiPPwcMfoIJ_U9gIrjUk7r4KKkoi9FaADrOud_2r4SeyJ8rBJE8RuMT9A1qy8EnaOEkeqKTWTGzhKM9s_k4WwqmKsdhKrJYv0qfyLCoUFBod9jYjTNgmx68dQPsypZpNoL7fhvteFGkJ9-yaxT_nPXoeg4O6BHXUTv4U_pgGVwSg"
+  },
+  "requestContext": {
+    "accountId": "123456789012",
+    "apiId": "api-id-123",
+    "domainName": "api.example.com",
+    "domainPrefix": "api",
+    "http": {
+      "method": "POST",
+      "path": "/users/signup",
+      "protocol": "HTTP/1.1",
+      "sourceIp": "192.168.1.1",
+      "userAgent": "curl/7.64.1"
+    },
+    "requestId": "request-id-123",
+    "routeKey": "POST /users/signup",
+    "stage": "$default",
+    "time": "10/Jan/2023:12:00:00 +0000",
+    "timeEpoch": 1640995200000
+  },
+  "body": "{\"id\":\"eyJraWQiOiJDN3RUMmhkamdiXC83VnZpcjdLV2pPd0dMWURQazdCU2IwYUt1dEtoTHdoQT0iLCJhbGciOiJSUzI1NiJ9.eyJhdF9oYXNoIjoiWkdUTG9pdUNTbENtSDYwcm4xclQzdyIsInN1YiI6IjMzMjRjODMyLTQwNDEtNzA1Mi1hMjNjLTIyYzZiM2M2ODM3MCIsImNvZ25pdG86Z3JvdXBzIjpbIkFkbWlucyJdLCJpc3MiOiJodHRwczpcL1wvY29nbml0by1pZHAuZXUtY2VudHJhbC0xLmFtYXpvbmF3cy5jb21cL2V1LWNlbnRyYWwtMV84cnRScUxCdTUiLCJjb2duaXRvOnVzZXJuYW1lIjoia29maS5neWF3dUBhbWFsaXRlY2guY29tIiwiYXVkIjoiNmY2dnJxNmIybzFndDkwZmo5dGlzc2VzMXIiLCJldmVudF9pZCI6IjU5MGQ2YjQ4LTQzZmItNDNhNi1iOWQ1LTc5MmNiYWE5NzM1YiIsInRva2VuX3VzZSI6ImlkIiwiYXV0aF90aW1lIjoxNzM3OTcxNzkwLCJleHAiOjE3Mzc5NzUzOTAsImlhdCI6MTczNzk3MTc5MCwianRpIjoiNDcyZmE5MTUtYTQ5MS00YWFhLWE3ZDAtNGQxNjdkZDJiNzg3IiwiZW1haWwiOiJrb2ZpLmd5YXd1QGFtYWxpdGVjaC5jb20ifQ.DAUVhlRIri0ZNawvM82G2IWdreA5OIckKbU5GVWN6Qu4f3FHFEsBI1xe7sihBB_OlvNsCPTSa-XChyEL5ESli8LhqNe0BdxohiYTgrGyJJSobwSD2PzWO6-TjZbc_yK2hkPUt58yasZVLzDniBKxGBRaM8hsTaqYJeWoOGzLiGGHdzAw-WYswYGXJBqwJnCrt2B41UEcMD3NrL4xWglhPIVSW1UTM5eVutYy0FjAw0Zpqc2f2YUSEkSZml1G86gU0DbEnMhTh239d900xCqujM_ltMuSjI3Yt6fP3FtxNGdC0FDSDzlu2BskoTD921WElpue9mO0t7ua4KNXT_lRKQ\"}",
+  "isBase64Encoded": false
+}

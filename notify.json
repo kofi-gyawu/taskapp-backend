@@ -1,0 +1,41 @@
+{
+  "Records": [
+    {
+      "messageId": "eb2c2696-598c-4574-9c5f-026c58561e83",
+      "receiptHandle": "AQEBUHyOlZ+2DSS6tgtqK4k0qSvMqHQPnb0T0iE+2hh1RahECzqybWemELZ+F1imLghCfmB10+u170C4Dnww6fCPiFAbvYTr/2WlUSrpezHdNjGRQeLKL8ZMIlV5/9xoiRGbsnQDCfQ/Q7QZ8v3DbggMqjD1gJuU1fUl1SDzBw8bGC+Dolq6qq3h/jrKiDDHrgIWdP9oDorJ68pcI89ub+w0l0r0W44nAoIDTeH9SFm2G86CHlRotLrM+bMB4ZT4HK5QgTgp5yBltKvfCVOCwClsKWyUj3xNWR3mAkRODutn/BBj8nj2fvBOC95d+qLcV7rXJP2qkjmaE6jxPO26GvTYzCOOfuv2J0pgY/OzjNC9xmrrqNag0Th0uOMgs5GYLKOQdYVACFQPzblib8HrO5Ujxg==",
+      "body": "responsibility=baffourthe3rd@gmail.com, name=Task 1, id=1737895393, deadline=2025-01-26T13:43:13.092248127, status=nul",
+      "attributes": {
+        "ApproximateReceiveCount": "487",
+        "AWSTraceHeader": "Root=1-67962dda-5f1faea7721b58332aa50f12;Parent=04a4ceb00a53b1c8;Sampled=0;Lineage=1:3a5e8199:0",
+        "SentTimestamp": "1737895395113",
+        "SenderId": "AROA3FRRI5V5FOXJGPQZA:createTask",
+        "ApproximateFirstReceiveTimestamp": "1737895400113"
+      },
+      "messageAttributes": {
+        "subject": {
+          "stringValue": "New Assignment",
+          "stringListValues": [],
+          "binaryListValues": [],
+          "dataType": "String"
+        },
+        "topic": {
+          "stringValue": "arn:aws:sns:eu-central-1:767828749690:TaskAssignmentNotificationTopic",
+          "stringListValues": [],
+          "binaryListValues": [],
+          "dataType": "String"
+        },
+        "user": {
+          "stringValue": "baffourthe3rd@gmail.com",
+          "stringListValues": [],
+          "binaryListValues": [],
+          "dataType": "String"
+        }
+      },
+      "md5OfMessageAttributes": "f9126cc4d1ec55fea58a65f5744a6235",
+      "md5OfBody": "e3c70ffbc2be51ad296782190e7cf149",
+      "eventSource": "aws:sqs",
+      "eventSourceARN": "arn:aws:sqs:eu-central-1:767828749690:TaskQueue",
+      "awsRegion": "eu-central-1"
+    }
+  ]
+}

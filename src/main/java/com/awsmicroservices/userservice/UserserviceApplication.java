@@ -3,13 +3,14 @@ package com.awsmicroservices.userservice;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
-import com.amazonaws.services.lambda.runtime.events.CognitoUserPoolPostConfirmationEvent;
 import com.amazonaws.services.lambda.runtime.events.SQSEvent;
 import com.amazonaws.services.lambda.runtime.events.ScheduledEvent;
+import com.auth0.jwt.JWT;
+import com.auth0.jwt.interfaces.DecodedJWT;
 import com.awsmicroservices.userservice.dto.AuthRequest;
-import com.awsmicroservices.userservice.entity.Comment;
 import com.awsmicroservices.userservice.entity.Task;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.awsmicroservices.userservice.entity.User;
 import org.slf4j.Logger;
@@ -46,19 +47,19 @@ import org.json.simple.parser.JSONParser;
 import org.json.simple.JSONObject;
 import software.amazon.awssdk.services.sfn.model.StartExecutionResponse;
 import software.amazon.awssdk.services.sns.SnsClient;
-import software.amazon.awssdk.services.sns.model.MessageAttributeValue;
 import software.amazon.awssdk.services.sns.model.PublishRequest;
 import software.amazon.awssdk.services.sns.model.PublishResponse;
 import software.amazon.awssdk.services.sns.model.SnsException;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.GetQueueUrlRequest;
+import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
-
 
 import java.io.FileReader;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
@@ -84,9 +85,11 @@ public class UserserviceApplication {
 				}
 				Object obj = message.getPayload();
 				try {
-					CognitoUserPoolPostConfirmationEvent event = objectMapper.readValue((byte[]) obj,CognitoUserPoolPostConfirmationEvent.class );
-					return "subscribeUser";
+					objectMapper.configure(MapperFeature.ACCEPT_CASE_INSENSITIVE_PROPERTIES,true);
+					SQSEvent event = objectMapper.readValue((byte[]) obj,SQSEvent.class );
+					return "notifyUsers";
 				} catch (Exception e) {
+					e.printStackTrace();
                     try {
                         ScheduledEvent event = objectMapper.readValue((byte[]) obj, ScheduledEvent.class);
                     } catch (IOException ex) {
@@ -110,8 +113,6 @@ public class UserserviceApplication {
 							return "createTask";
 						case "POST /task/comment":
 							return "comment";
-						case "GET /task/comment":
-							return "getComments";
 						case "GET /task":
 							return "listTasks";
 						case "PATCH /task/complete":
@@ -188,6 +189,7 @@ public class UserserviceApplication {
 						.logins(logins)
 						.build();
 				GetCredentialsForIdentityResponse response = client.getCredentialsForIdentity(getCredentialsForIdentityRequest);
+				System.out.println("get credentials successful");
 				Map<String,String> credentials = new HashMap<>();
 				credentials.put("accessKeyId",response.credentials().accessKeyId());
 				credentials.put("sessionToken",response.credentials().sessionToken());
@@ -216,6 +218,7 @@ public class UserserviceApplication {
 						.username(user.email)
 						.build();
 				AdminCreateUserResponse cognitoResponse = cognitoClient.adminCreateUser(adminCreateUserRequest);
+				subscribeUser(user.email);
 				Map<String, Object> responseBody = new HashMap<>();
 				responseBody.put("message", "User registration successful. Please check your email for verification code.");
 				response.setStatusCode(200);
@@ -233,6 +236,8 @@ public class UserserviceApplication {
 				response.setBody(createErrorResponse("Invalid parameters provided"));
 			} catch (Exception e) {
 				response.setStatusCode(500);
+				logger.info(e.getMessage());
+				System.out.println(e.getMessage());
 				response.setBody(createErrorResponse("Internal server error"));
 			}
 			return response;
@@ -248,11 +253,8 @@ public class UserserviceApplication {
 		}
 	}
 
-	@Bean
-	public Function<CognitoUserPoolPostConfirmationEvent,StartExecutionResponse> subscribeUser () {
-		return (event) ->  {
+	public void subscribeUser (String email) {
 			logger.info("Processing subscription request");
-			String email = event.getRequest().getUserAttributes().get("email");
 			Map<String, String> stepFunctionInput = new HashMap<>();
 			stepFunctionInput.put("userEmail", email);
 			stepFunctionInput.put("topic1", System.getenv("TaskAssignmentNotificationTopic"));
@@ -271,8 +273,6 @@ public class UserserviceApplication {
             StartExecutionResponse response = sfnClient().startExecution(request);
 			logger.info("subscribing this email " + email);
 			logger.info("operation status: " + response.sdkHttpResponse().statusCode());
-			return response;
-		};
 	}
 
 	private static String getJSONString(String path) {
@@ -292,6 +292,7 @@ public class UserserviceApplication {
 	public Function<APIGatewayProxyRequestEvent, Task> createTask () {
 		return (request) -> {
 			try {
+				System.out.println("started");
 				Task task = objectMapper.readValue(request.getBody(),Task.class);
 				task.setId(String.valueOf(LocalDateTime.now().toEpochSecond(ZoneOffset.UTC)));
 				task.setDeadline(LocalDateTime.now().plusHours(1));
@@ -300,15 +301,17 @@ public class UserserviceApplication {
 				item.put("name", AttributeValue.builder().s(task.name).build());
 				item.put("description", AttributeValue.builder().s(task.description).build());
 				item.put("status", AttributeValue.builder().s("open").build());
-				item.put("deadline", AttributeValue.builder().s(task.getDeadline().toString()).build());
+				item.put("deadline", AttributeValue.builder().n(String.valueOf(task.getDeadline().toEpochSecond(ZoneOffset.UTC))).build());
 				item.put("responsibility", AttributeValue.builder().s(task.responsibility).build());
 				item.put("completed_at", AttributeValue.builder().s("").build());
+				item.put("comment", AttributeValue.builder().s("").build());
 				PutItemRequest putItemRequest = PutItemRequest.builder()
 						.tableName(System.getenv("TASK_TABLE"))
 						.item(item)
 						.build();
 				dynamoDbClient().putItem(putItemRequest);
-				sendMessage(task);
+				System.out.println("reached here");
+				sendMessage(System.getenv("TaskAssignmentNotificationTopic"),"New Assignment",task);
 				return task;
 			} catch (JsonProcessingException e) {
 				throw new RuntimeException(e);
@@ -316,20 +319,29 @@ public class UserserviceApplication {
 		};
 	}
 
-	public void sendMessage(String topic,Task task) {
-		Map<String, software.amazon.awssdk.services.sqs.model.MessageAttributeValue> map = new HashMap<>();
-		map.put("topic", .builder().stringValue(topic).build());
-		GetQueueUrlRequest getQueueRequest = GetQueueUrlRequest.builder()
-				.queueName("TaskQueue")
-				.build();
-		String queueUrl = sqsClient().getQueueUrl(getQueueRequest).queueUrl();
-		SendMessageRequest sendMsgRequest = SendMessageRequest.builder()
-				.queueUrl(queueUrl)
-				.messageBody(task.toString())
-				.messageAttributes(map)
-				.delaySeconds(5)
-				.build();
-		sqsClient().sendMessage(sendMsgRequest);
+	public void sendMessage(String topic,String subject,Task task) {
+		try{
+			logger.info("########"+subject);
+			Map<String, software.amazon.awssdk.services.sqs.model.MessageAttributeValue> map = new HashMap<>();
+			map.put("topic", MessageAttributeValue.builder().dataType("String").stringValue(topic).build());
+			map.put("user", MessageAttributeValue.builder().dataType("String").stringValue(task.responsibility).build());
+			map.put("subject", MessageAttributeValue.builder().dataType("String").stringValue(subject).build());
+			GetQueueUrlRequest getQueueRequest = GetQueueUrlRequest.builder()
+					.queueName(System.getenv("TASK_QUEUE"))
+					.build();
+			String queueUrl = sqsClient().getQueueUrl(getQueueRequest).queueUrl();
+
+			SendMessageRequest sendMsgRequest = SendMessageRequest.builder()
+					.queueUrl(queueUrl)
+					.messageBody(task.toString())
+					.messageAttributes(map)
+					.delaySeconds(5)
+					.build();
+			sqsClient().sendMessage(sendMsgRequest);
+		} catch (Exception e) {
+			logger.info("########"+System.getenv("TASK_QUEUE"));
+			logger.info("########"+e.getMessage());
+		}
 	}
 
 	@Bean
@@ -347,6 +359,19 @@ public class UserserviceApplication {
             }
 		};
 	}
+
+    @Bean
+    public Function<APIGatewayProxyRequestEvent,Task> comment() {
+        return (request) -> {
+            try {
+                Task task = objectMapper.readValue(request.getBody(),Task.class);
+				task = updateTask(task);
+				return task;
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException(e);
+            }
+        };
+    }
 
 	@Bean
 	public Function<APIGatewayProxyRequestEvent,Task> reassignTask() {
@@ -413,6 +438,14 @@ public class UserserviceApplication {
 					.build()
 			);
 		}
+        if(task.getComment() != null) {
+            item.put("comment",AttributeValueUpdate.builder()
+                    .value(AttributeValue.builder()
+                            .s(task.getComment())
+                            .build())
+                    .build()
+            );
+        }
 		UpdateItemRequest updateItemRequest = UpdateItemRequest.builder()
 				.tableName(System.getenv("TASK_TABLE"))
 				.key(key)
@@ -426,64 +459,29 @@ public class UserserviceApplication {
 	public Function<APIGatewayProxyRequestEvent,Object> listTasks () {
 		return (request) -> {
             try {
-                String email = objectMapper.writeValueAsString(request.getBody());
-				ScanRequest scanRequest = ScanRequest.builder()
-						.tableName(System.getenv("TASK_TABLE"))
-						.filterExpression("email = :emailValue")
-						.expressionAttributeValues(Map.of(
-								":emailValue", AttributeValue.builder().s(email).build()
-						))
-						.build();
+				String idToken = objectMapper.readValue(request.getBody(), AuthRequest.class).getId();
+				DecodedJWT jwt =JWT.decode(idToken);
+				boolean isAdmin = !Arrays.stream(jwt.getClaims().get("cognito:groups").asArray(String.class)).toList().isEmpty();
+                String email = jwt.getClaims().get("email").asString();
+				ScanRequest scanRequest;
+				if(isAdmin){
+					scanRequest = ScanRequest.builder()
+							.tableName(System.getenv("TASK_TABLE"))
+							.build();
+				} else {
+					scanRequest = ScanRequest.builder()
+							.tableName(System.getenv("TASK_TABLE"))
+							.filterExpression("email = :emailValue")
+							.expressionAttributeValues(Map.of(
+									":emailValue", AttributeValue.builder().s(email).build()
+							))
+							.build();
+				}
 				ScanResponse response = dynamoDbClient().scan(scanRequest);
 				return response.items();
             } catch (JsonProcessingException e) {
                 throw new RuntimeException(e);
             }
-
-		};
-	}
-
-	@Bean
-	public Function<APIGatewayProxyRequestEvent,Comment> comment() {
-		return (request) -> {
-            try {
-                Comment comment = objectMapper.readValue(request.getBody(),Comment.class);
-				comment.setTimeStamp(LocalDateTime.now());
-				Map<String, AttributeValue> item = new HashMap<>();
-				item.put("id", AttributeValue.builder().n(String.valueOf(comment.getTimeStamp().toEpochSecond(ZoneOffset.UTC))).build());
-				item.put("task_id", AttributeValue.builder().n(String.valueOf(comment.getTaskId())).build());
-				item.put("sender", AttributeValue.builder().s(comment.getSender()).build());
-				item.put("body", AttributeValue.builder().s(comment.getBody()).build());
-				item.put("timeStamp", AttributeValue.builder().s(comment.getTimeStamp().toString()).build());
-				PutItemRequest putItemRequest = PutItemRequest.builder()
-						.tableName(System.getenv("COMMENT_TABLE"))
-						.item(item)
-						.build();
-				dynamoDbClient().putItem(putItemRequest);
-            } catch (JsonProcessingException e) {
-                throw new RuntimeException(e);
-            }
-            return null;
-		};
-	}
-
-	@Bean
-	public Function<APIGatewayProxyRequestEvent,Object> getComments () {
-		return (request) -> {
-			try {
-				String email = objectMapper.writeValueAsString(request.getBody());
-				ScanRequest scanRequest = ScanRequest.builder()
-						.tableName(System.getenv("COMMENT_TABLE"))
-						.filterExpression("task = :emailValue")
-						.expressionAttributeValues(Map.of(
-								":emailValue", AttributeValue.builder().s(email).build()
-						))
-						.build();
-				ScanResponse response = dynamoDbClient().scan(scanRequest);
-				return response.items();
-			} catch (JsonProcessingException e) {
-				throw new RuntimeException(e);
-			}
 
 		};
 	}
@@ -499,20 +497,32 @@ public class UserserviceApplication {
 	public Function<SQSEvent,Task> notifyUsers () {
 		return (request) -> {
 			try {
-				SQSEvent.SQSMessage msg = request.getRecords().get(0);
-				PublishRequest request = PublishRequest.builder()
-						.message(msg.getBody())
-						.topicArn(topicArn)
-						.build();
-
-				PublishResponse result = snsClient().publish(request);
-				System.out
-						.println(result.messageId() + " Message sent. Status is " + result.sdkHttpResponse().statusCode());
+				logger.info("########"+"notifiying");
+				request.getRecords().forEach((msg)->{
+					Map<String, software.amazon.awssdk.services.sns.model.MessageAttributeValue> attributes = new HashMap<>();
+					attributes.put("user",software.amazon.awssdk.services.sns.model.MessageAttributeValue.builder()
+							.dataType("String")
+							.stringValue(
+									msg.getMessageAttributes()
+											.get("user")
+											.getStringValue()
+							).build());
+					PublishRequest publishRequest = PublishRequest.builder()
+							.subject(msg.getMessageAttributes().get("subject").getStringValue())
+							.message(msg.getBody())
+							.topicArn(msg.getMessageAttributes().get("topic").getStringValue())
+							.messageAttributes(attributes)
+							.build();
+					PublishResponse result = snsClient().publish(publishRequest);
+					System.out
+							.println(result.messageId() + " Message sent. Status is " + result.sdkHttpResponse().statusCode());
+				});
 				return new Task();
 			} catch (SnsException e) {
+				logger.info(e.getMessage());
 				System.err.println(e.awsErrorDetails().errorMessage());
-				System.exit(1);
 			}
+            return new Task();
 		};
 		//based on the task change
 	}

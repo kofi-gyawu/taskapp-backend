@@ -1,70 +1,98 @@
 {
-  "Comment": "Subscribe user to SNS topics",
-  "StartAt": "Subscribe to Topic TaskAssignmentNotificationTopic",
+  "Comment": "Subscribe user to SNS topics in parallel with user email filter",
+  "StartAt": "Parallel Topic Subscriptions",
   "States": {
-    "Subscribe to Topic TaskAssignmentNotificationTopic": {
-      "Type": "Task",
-      "Resource": "arn:aws:states:::aws-sdk:sns:subscribe",
-      "Parameters": {
-        "TopicArn.$": "$.topic1",
-        "Protocol": "email",
-        "Endpoint.$": "$.userEmail"
-      },
-      "Next": "Subscribe to Topic TaskDeadlineNotificationTopic",
+    "Parallel Topic Subscriptions": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "Subscribe to TaskAssignmentNotificationTopic",
+          "States": {
+            "Subscribe to TaskAssignmentNotificationTopic": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:sns:subscribe",
+              "Parameters": {
+                "TopicArn.$": "$.topic1",
+                "Protocol": "email",
+                "Endpoint.$": "$.userEmail",
+                "Attributes": {
+                  "FilterPolicy": {
+                    "user.$":  "States.Array($.userEmail)"
+                  }
+                }
+              },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "Subscribe to TaskDeadlineNotificationTopic",
+          "States": {
+            "Subscribe to TaskDeadlineNotificationTopic": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:sns:subscribe",
+              "Parameters": {
+                "TopicArn.$": "$.topic2",
+                "Protocol": "email",
+                "Endpoint.$": "$.userEmail",
+                "Attributes": {
+                  "FilterPolicy": {
+                    "user.$":  "States.Array($.userEmail)"
+                  }
+                }
+              },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "Subscribe to ClosedTaskNotificationTopic",
+          "States": {
+            "Subscribe to ClosedTaskNotificationTopic": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:sns:subscribe",
+              "Parameters": {
+                "TopicArn.$": "$.topic3",
+                "Protocol": "email",
+                "Endpoint.$": "$.userEmail",
+                "Attributes": {
+                  "FilterPolicy": {
+                    "user.$":  "States.Array($.userEmail)"
+                  }
+                }
+              },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "Subscribe to ReopenedTasksNotificationTopic",
+          "States": {
+            "Subscribe to ReopenedTasksNotificationTopic": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:sns:subscribe",
+              "Parameters": {
+                "TopicArn.$": "$.topic4",
+                "Protocol": "email",
+                "Endpoint.$": "$.userEmail",
+                "Attributes": {
+                  "FilterPolicy": {
+                    "user.$":  "States.Array($.userEmail)"
+                  }
+                }
+              },
+              "End": true
+            }
+          }
+        }
+      ],
       "Catch": [
         {
           "ErrorEquals": ["States.ALL"],
           "Next": "Handle Error"
         }
-      ]
-    },
-    "Subscribe to Topic TaskDeadlineNotificationTopic": {
-      "Type": "Task",
-      "Resource": "arn:aws:states:::aws-sdk:sns:subscribe",
-      "Parameters": {
-        "TopicArn.$": "$.topic2",
-        "Protocol": "email",
-        "Endpoint.$": "$.userEmail"
-      },
-      "Next": "Subscribe to Topic ClosedTaskNotificationTopic",
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "Next": "Handle Error"
-        }
-      ]
-    },
-    "Subscribe to Topic ClosedTaskNotificationTopic": {
-      "Type": "Task",
-      "Resource": "arn:aws:states:::aws-sdk:sns:subscribe",
-      "Parameters": {
-        "TopicArn.$": "$.topic3",
-        "Protocol": "email",
-        "Endpoint.$": "$.userEmail"
-      },
-      "Next": "Subscribe to Topic ReopenedTasksNotificationTopic",
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "Next": "Handle Error"
-        }
-      ]
-    },
-    "Subscribe to Topic ReopenedTasksNotificationTopic": {
-      "Type": "Task",
-      "Resource": "arn:aws:states:::aws-sdk:sns:subscribe",
-      "Parameters": {
-        "TopicArn.$": "$.topic4",
-        "Protocol": "email",
-        "Endpoint.$": "$.userEmail"
-      },
-      "Next": "Success",
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "Next": "Handle Error"
-        }
-      ]
+      ],
+      "Next": "Success"
     },
     "Success": {
       "Type": "Succeed"

@@ -15,6 +15,7 @@ public class Task {
     public LocalDateTime deadline;
     public String responsibility;
     public LocalDateTime completed_at;
+    public String comment;
 
     @Override
     public String toString() {
@@ -24,7 +25,7 @@ public class Task {
         map.put("status", this.status);
         map.put("deadline", this.deadline.toString());
         map.put("responsibility",this.responsibility);
-        map.put("completed_at",this.completed_at.toString());
+        if(this.completed_at != null){map.put("completed_at",this.completed_at.toString());}
         String representation = map.toString();
         return representation.substring(1,representation.length() -2);
     }

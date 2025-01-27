@@ -3,6 +3,13 @@ Transform: AWS::Serverless-2016-10-31
 
 Globals:
   HttpApi:
+    CorsConfiguration:
+      AllowOrigins:
+        - "*"
+      AllowHeaders:
+        - "*"
+      AllowMethods:
+        - "*"
     Auth:
       EnableIamAuthorizer: true
 
@@ -27,8 +34,9 @@ Resources:
       UserPoolName: !Ref UserPoolName
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true
-      LambdaConfig:
-        PostConfirmation: !GetAtt TopicSubscriptionsFunction.Arn
+        InviteMessageTemplate:
+          EmailMessage: "Hello, {username}. this is your temporary password: {####} , use this link to sign in: https://sam-app-sam-app.auth.eu-central-1.amazoncognito.com/login?client_id=6f6vrq6b2o1gt90fj9tisses1r&redirect_uri=http://localhost:3000/callback&response_type=token"
+          EmailSubject: "Taskapp Credentials"
       Policies:
         PasswordPolicy:
           MinimumLength: 8
@@ -41,11 +49,6 @@ Resources:
           AttributeDataType: String
           Mutable: true
           Required: true
-      VerificationMessageTemplate:
-        DefaultEmailOption: CONFIRM_WITH_LINK
-        EmailSubject: "Welcome to My App! Please verify your email"
-        EmailMessage: |
-          Hello, {username}. Please verify your email address by clicking the link below: {####}
 
   AdminGroup:
     Type: AWS::Cognito::UserPoolGroup
@@ -79,7 +82,6 @@ Resources:
       Endpoint: !Ref AdminUser
       Protocol: email
 
-
   AddUserAdminToAdminGroup:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:
@@ -87,11 +89,10 @@ Resources:
       GroupName: !Ref AdminGroup
       Username: !Ref AdminUser
 
-
   UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
     Properties:
-      Domain: sam-app-test-123
+      Domain: !Sub sam-app-${AWS::StackName}
       UserPoolId: !Ref CognitoUserPool
 
   UserPoolClient:
@@ -114,6 +115,7 @@ Resources:
         - ALLOW_REFRESH_TOKEN_AUTH
       CallbackURLs:
         - http://localhost:3000/callback
+        - https://main.d2999je8ebi5mc.amplifyapp.com/
 
   CognitoIdentityPool:
     Type: AWS::Cognito::IdentityPool
@@ -137,8 +139,8 @@ Resources:
             Condition:
               StringEquals:
                 'cognito-identity.amazonaws.com:aud': !Ref CognitoIdentityPool
-              'ForAnyValue:StringLike':
-                'cognito-identity.amazonaws.com:amr': authenticated
+#              'ForAnyValue:StringLike':
+#                'cognito-identity.amazonaws.com:amr': authenticated
       Policies:
         - PolicyName: AuthenticatedPolicy
           PolicyDocument:
@@ -150,7 +152,6 @@ Resources:
                 Resource:
                   - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ServerlessHttpApi}/*/GET/task
                   - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ServerlessHttpApi}/*/POST/task/comment
-                  - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ServerlessHttpApi}/*/GET/task/comment
                   - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ServerlessHttpApi}/*/PATCH/task/complete
 
   # IAM role for admin users
@@ -163,13 +164,14 @@ Resources:
           - Effect: Allow
             Principal:
               Federated: cognito-identity.amazonaws.com
-            Action: sts:AssumeRoleWithWebIdentity
+            Action:
+              - sts:AssumeRoleWithWebIdentity
             Condition:
               StringEquals:
                 'cognito-identity.amazonaws.com:aud': !Ref CognitoIdentityPool
-              'ForAnyValue:StringLike':
-                'cognito-identity.amazonaws.com:amr': authenticated
-                'cognito-identity.amazonaws.com:groups': Admins
+#              'ForAnyValue:StringLike':
+#                'cognito-identity.amazonaws.com:groups': Admins
+#                'cognito-identity.amazonaws.com:amr': authenticated
       Policies:
         - PolicyName: AdminPolicy
           PolicyDocument:
@@ -187,10 +189,10 @@ Resources:
       Roles:
         authenticated: !GetAtt AuthenticatedRole.Arn
       RoleMappings:
-        "userpool":
-          Type: Token
+        cognito-idp:
+          Type: Rules
           AmbiguousRoleResolution: AuthenticatedRole
-          IdentityProvider: !Sub ${CognitoUserPool.ProviderName}:${UserPoolClient}
+          IdentityProvider: !Sub cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPool}:${UserPoolClient}
           RulesConfiguration:
             Rules:
               - Claim: "cognito:groups"
@@ -214,7 +216,12 @@ Resources:
               Action:
                 - cognito-idp:GetId
                 - cognito-idp:GetCredentialsForIdentity
-              Resource: arn:aws:cognito-identity:eu-central-1:122610498016:identitypool/eu-central-1:e8c0e26f-dbdc-4892-b742-f5895ca4766f
+              Resource: !Sub arn:aws:cognito-identity:${AWS::Region}:${AWS::AccountId}:identitypool/${CognitoIdentityPool}
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminConfirmSignUp
+              Resource: !GetAtt CognitoUserPool.Arn
         - AWSLambdaBasicExecutionRole
         - CloudWatchLambdaInsightsExecutionRolePolicy
       Environment:
@@ -248,7 +255,13 @@ Resources:
             - Effect: Allow
               Action:
                 - cognito-idp:AdminCreateUser
+                - cognito-idp:AdminConfirmSignUp
               Resource: !GetAtt CognitoUserPool.Arn
+        - Statement:
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource: !Ref TopicSubscriptionStateMachine
         - AWSLambdaBasicExecutionRole
         - CloudWatchLambdaInsightsExecutionRolePolicy
       Environment:
@@ -257,6 +270,11 @@ Resources:
           SPRING_CLOUD_DEFINITION: registerUser
           COGNITO_USER_POOL_ID: !Ref CognitoUserPool
           COGNITO_CLIENT_ID: !Ref UserPoolClient
+          STATE_MACHINE_ARN: !Ref TopicSubscriptionStateMachine
+          TaskAssignmentNotificationTopic: !Ref TaskAssignmentNotificationTopic
+          TaskDeadlineNotificationTopic: !Ref TaskDeadlineNotificationTopic
+          ClosedTaskNotificationTopic: !Ref ClosedTaskNotificationTopic
+          ReopenedTasksNotificationTopic: !Ref ReopenedTasksNotificationTopic
           LOG_LEVEL: INFO
       Events:
         Api:
@@ -266,34 +284,6 @@ Resources:
               Authorizer: AWS_IAM
             Path: /signup
             Method: POST
-
-  TopicSubscriptionsFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: subscribeUser
-      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
-      Runtime: java17
-      CodeUri: .
-      MemorySize: 512
-      Timeout: 30
-      Tracing: Active
-      Policies:
-        - AWSLambdaBasicExecutionRole
-        - CloudWatchLambdaInsightsExecutionRolePolicy
-        - Statement:
-            - Effect: Allow
-              Action:
-                - states:StartExecution
-              Resource: !Ref TopicSubscriptionStateMachine
-      Environment:
-        Variables:
-          MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
-          SPRING_CLOUD_DEFINITION: subscribeUser
-          STATE_MACHINE_ARN: !Ref TopicSubscriptionStateMachine
-          TaskAssignmentNotificationTopic: !Ref TaskAssignmentNotificationTopic
-          TaskDeadlineNotificationTopic: !Ref TaskDeadlineNotificationTopic
-          ClosedTaskNotificationTopic: !Ref ClosedTaskNotificationTopic
-          ReopenedTasksNotificationTopic: !Ref ReopenedTasksNotificationTopic
 
   TopicSubscriptionStateMachine:
     Type: AWS::Serverless::StateMachine
@@ -365,14 +355,6 @@ Resources:
         Name: id
         Type: Number
 
-  CommentTable:
-    Type: AWS::Serverless::SimpleTable
-    Properties:
-      TableName: CommentTable
-      PrimaryKey:
-        Name: id
-        Type: Number
-
 #add authorizer
   CreateTask:
     Type: AWS::Serverless::Function
@@ -387,10 +369,19 @@ Resources:
         - AWSLambdaBasicExecutionRole
         - DynamoDBCrudPolicy:
             TableName: !Ref TaskTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sqs:SendMessage
+                - sqs:GetQueueUrl
+              Resource:
+                - !GetAtt TaskQueue.Arn
       Environment:
         Variables:
           MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
           TASK_TABLE: !Ref TaskTable
+          TASK_QUEUE: !GetAtt TaskQueue.QueueName
+          TaskAssignmentNotificationTopic: !Ref TaskAssignmentNotificationTopic
       Events:
         Api:
           Type: HttpApi
@@ -417,7 +408,6 @@ Resources:
         Variables:
           MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
           TASK_TABLE: !Ref TaskTable
-          COMMENT_TABLE: !Ref CommentTable
       Events:
         Api:
           Type: HttpApi
@@ -444,7 +434,6 @@ Resources:
         Variables:
           MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
           TASK_TABLE: !Ref TaskTable
-          COMMENT_TABLE: !Ref CommentTable
       Events:
         Api:
           Type: HttpApi
@@ -471,7 +460,6 @@ Resources:
         Variables:
           MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
           TASK_TABLE: !Ref TaskTable
-          COMMENT_TABLE: !Ref CommentTable
       Events:
         Api:
           Type: HttpApi
@@ -498,7 +486,6 @@ Resources:
         Variables:
           MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
           TASK_TABLE: !Ref TaskTable
-          COMMENT_TABLE: !Ref CommentTable
       Events:
         Api:
           Type: HttpApi
@@ -521,6 +508,16 @@ Resources:
       Policies:
         - AWSLambdaBasicExecutionRole
         - AWSLambdaSQSQueueExecutionRole
+        - CloudWatchLambdaInsightsExecutionRolePolicy
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource:
+                - !Ref TaskAssignmentNotificationTopic
+                - !Ref TaskDeadlineNotificationTopic
+                - !Ref ClosedTaskNotificationTopic
+                - !Ref ReopenedTasksNotificationTopic
       Environment:
         Variables:
           MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
@@ -530,22 +527,13 @@ Resources:
           TaskDeadlineNotificationTopic: !Ref TaskDeadlineNotificationTopic
           ClosedTaskNotificationTopic: !Ref ClosedTaskNotificationTopic
           ReopenedTasksNotificationTopic: !Ref ReopenedTasksNotificationTopic
+          LOG_LEVEL: INFO
       Events:
         SQSEvent:
           Type: SQS
           Properties:
             Queue: !GetAtt TaskQueue.Arn
             BatchSize: 1
-
-#
-#      Events:
-#        Api:
-#          Type: HttpApi
-#          Properties:
-#            Auth:
-#              Authorizer: AWS_IAM
-#            Path: /signup
-#            Method: POST
 
   CheckDeadlines:
     Type: AWS::Serverless::Function
@@ -564,15 +552,12 @@ Resources:
         Variables:
           MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
           TASK_TABLE: !Ref TaskTable
-          COMMENT_TABLE: !Ref CommentTable
       Events:
         Schedule:
           Type: ScheduleV2
           Properties:
             ScheduleExpression: 'rate(30 minutes)'
             Name: CheckExpiredDeadlines
-
-
 
   MakeComment:
     Type: AWS::Serverless::Function
@@ -586,12 +571,11 @@ Resources:
       Policies:
         - AWSLambdaBasicExecutionRole
         - DynamoDBCrudPolicy:
-            TableName: !Ref CommentTable
+            TableName: !Ref TaskTable
       Environment:
         Variables:
           MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
           TASK_TABLE: !Ref TaskTable
-          COMMENT_TABLE: !Ref CommentTable
       Events:
         Api:
           Type: HttpApi
@@ -600,33 +584,6 @@ Resources:
               Authorizer: AWS_IAM
             Path: /task/comment
             Method: POST
-
-  GetComments:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: getComments
-      Handler: org.springframework.cloud.function.adapter.aws.FunctionInvoker::handleRequest
-      Runtime: java17
-      CodeUri: .
-      MemorySize: 512
-      Timeout: 30
-      Policies:
-        - AWSLambdaBasicExecutionRole
-        - DynamoDBCrudPolicy:
-            TableName: !Ref CommentTable
-      Environment:
-        Variables:
-          MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
-          TASK_TABLE: !Ref TaskTable
-          COMMENT_TABLE: !Ref CommentTable
-      Events:
-        Api:
-          Type: HttpApi
-          Properties:
-            Auth:
-              Authorizer: AWS_IAM
-            Path: /task/comment
-            Method: GET
 
 Outputs:
   UserApi:

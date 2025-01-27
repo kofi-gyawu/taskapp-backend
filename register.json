@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "routeKey": "POST /users/signup",
+  "routeKey": "POST /signup",
   "rawPath": "/users/signup",
   "rawQueryString": "",
   "headers": {
