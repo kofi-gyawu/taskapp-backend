@@ -3,6 +3,7 @@ package com.awsmicroservices.userservice;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPEvent;
+import com.amazonaws.services.lambda.runtime.events.S3BatchEvent;
 import com.amazonaws.services.lambda.runtime.events.SQSEvent;
 import com.amazonaws.services.lambda.runtime.events.ScheduledEvent;
 import com.auth0.jwt.JWT;
@@ -10,9 +11,11 @@ import com.auth0.jwt.interfaces.DecodedJWT;
 import com.awsmicroservices.userservice.dto.AuthRequest;
 import com.awsmicroservices.userservice.entity.Task;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.awsmicroservices.userservice.entity.User;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.SpringApplication;
@@ -41,6 +44,7 @@ import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.ScanRequest;
 import software.amazon.awssdk.services.dynamodb.model.ScanResponse;
 import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.UpdateItemResponse;
 import software.amazon.awssdk.services.sfn.SfnClient;
 import software.amazon.awssdk.services.sfn.model.StartExecutionRequest;
 import org.json.simple.parser.JSONParser;
@@ -51,6 +55,7 @@ import software.amazon.awssdk.services.sns.model.PublishRequest;
 import software.amazon.awssdk.services.sns.model.PublishResponse;
 import software.amazon.awssdk.services.sns.model.SnsException;
 import software.amazon.awssdk.services.sqs.SqsClient;
+import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
 import software.amazon.awssdk.services.sqs.model.GetQueueUrlRequest;
 import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
@@ -61,6 +66,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
@@ -69,8 +75,14 @@ import java.util.function.Function;
 public class UserserviceApplication {
 
 	private static final Logger logger = LoggerFactory.getLogger(UserserviceApplication.class);
-	private static final ObjectMapper objectMapper = new ObjectMapper();
 
+	@Bean
+	public ObjectMapper objectMapper () {
+		ObjectMapper objectMapper = new ObjectMapper();
+		objectMapper.registerModule(new JavaTimeModule());
+		objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,false);
+		return objectMapper;
+	}
 	public static void main(String[] args) {
 		SpringApplication.run(UserserviceApplication.class, args);
 	}
@@ -85,23 +97,23 @@ public class UserserviceApplication {
 				}
 				Object obj = message.getPayload();
 				try {
-					objectMapper.configure(MapperFeature.ACCEPT_CASE_INSENSITIVE_PROPERTIES,true);
-					SQSEvent event = objectMapper.readValue((byte[]) obj,SQSEvent.class );
+					objectMapper().configure(MapperFeature.ACCEPT_CASE_INSENSITIVE_PROPERTIES,true);
+					SQSEvent event = objectMapper().readValue((byte[]) obj,SQSEvent.class );
 					return "notifyUsers";
 				} catch (Exception e) {
 					e.printStackTrace();
                     try {
-                        ScheduledEvent event = objectMapper.readValue((byte[]) obj, ScheduledEvent.class);
+                        ScheduledEvent event = objectMapper().readValue((byte[]) obj, ScheduledEvent.class);
+                        return "checkDeadlines";
                     } catch (IOException ex) {
                         throw new RuntimeException(ex);
                     }
                 }
-                return null;
             }
 
 			public String routeAPIGatewayRequest(Object payload) {
 				try{
-					APIGatewayV2HTTPEvent event = objectMapper.readValue((byte[]) payload,APIGatewayV2HTTPEvent.class);
+					APIGatewayV2HTTPEvent event = objectMapper().readValue((byte[]) payload,APIGatewayV2HTTPEvent.class);
 					System.out.println("payload " + event);
 					switch (event.getRouteKey()) {
 						case "POST /auth":
@@ -113,7 +125,7 @@ public class UserserviceApplication {
 							return "createTask";
 						case "POST /task/comment":
 							return "comment";
-						case "GET /task":
+						case "POST /tasks":
 							return "listTasks";
 						case "PATCH /task/complete":
 							return "completeTask";
@@ -121,7 +133,6 @@ public class UserserviceApplication {
 							return "reopenTask";
 						case "PATCH /task/reassign":
 							return "reassignTask";
-						//close task
 					}
 					return null;
 				} catch (Exception e) {
@@ -176,7 +187,7 @@ public class UserserviceApplication {
 				CognitoIdentityClient client = CognitoIdentityClient.builder()
 						.region(Region.EU_CENTRAL_1)
 						.build();
-                idToken = objectMapper.readValue(request.getBody(), AuthRequest.class).getId();
+                idToken = objectMapper().readValue(request.getBody(), AuthRequest.class).getId();
 				Map<String, String> logins = new HashMap<>();
 				logins.put("cognito-idp."+ System.getenv("AWS_REGION")+ ".amazonaws.com/"+ System.getenv("COGNITO_USER_POOL_ID"),idToken);
 				GetIdRequest getIdRequest = GetIdRequest.builder()
@@ -207,7 +218,7 @@ public class UserserviceApplication {
 			APIGatewayProxyResponseEvent response = new APIGatewayProxyResponseEvent();
 			response.setHeaders(Map.of("Content-Type", "application/json"));
             try {
-                User user = objectMapper.readValue(request.getBody(),User.class);
+                User user = objectMapper().readValue(request.getBody(),User.class);
 				AttributeType emailAttribute = AttributeType.builder()
 						.name("email")
 						.value(user.email)
@@ -222,7 +233,7 @@ public class UserserviceApplication {
 				Map<String, Object> responseBody = new HashMap<>();
 				responseBody.put("message", "User registration successful. Please check your email for verification code.");
 				response.setStatusCode(200);
-				response.setBody(objectMapper.writeValueAsString(responseBody));
+				response.setBody(objectMapper().writeValueAsString(responseBody));
             } catch (JsonProcessingException e) {
 				throw new RuntimeException(e);
 			} catch (UsernameExistsException e) {
@@ -247,7 +258,7 @@ public class UserserviceApplication {
 	private String createErrorResponse(String message) {
 		try {
 			Map<String, String> errorResponse = Map.of("error", message);
-			return objectMapper.writeValueAsString(errorResponse);
+			return objectMapper().writeValueAsString(errorResponse);
 		} catch (Exception e) {
 			return "{\"error\":\"Error creating error response\"}";
 		}
@@ -265,7 +276,7 @@ public class UserserviceApplication {
             try {
                 request = StartExecutionRequest.builder()
                         .stateMachineArn(System.getenv("STATE_MACHINE_ARN"))
-                        .input(objectMapper.writeValueAsString(stepFunctionInput))
+                        .input(objectMapper().writeValueAsString(stepFunctionInput))
                         .build();
             } catch (JsonProcessingException e) {
                 throw new RuntimeException(e);
@@ -293,7 +304,7 @@ public class UserserviceApplication {
 		return (request) -> {
 			try {
 				System.out.println("started");
-				Task task = objectMapper.readValue(request.getBody(),Task.class);
+				Task task = objectMapper().readValue(request.getBody(),Task.class);
 				task.setId(String.valueOf(LocalDateTime.now().toEpochSecond(ZoneOffset.UTC)));
 				task.setDeadline(LocalDateTime.now().plusHours(1));
 				Map<String, AttributeValue> item = new HashMap<>();
@@ -330,7 +341,6 @@ public class UserserviceApplication {
 					.queueName(System.getenv("TASK_QUEUE"))
 					.build();
 			String queueUrl = sqsClient().getQueueUrl(getQueueRequest).queueUrl();
-
 			SendMessageRequest sendMsgRequest = SendMessageRequest.builder()
 					.queueUrl(queueUrl)
 					.messageBody(task.toString())
@@ -348,11 +358,11 @@ public class UserserviceApplication {
 	public Function<APIGatewayProxyRequestEvent,Task> completeTask() {
 		return (request) -> {
             try {
-                Task task = objectMapper.readValue(request.getBody(),Task.class);
+                Task task = objectMapper().readValue(request.getBody(),Task.class);
 				task.setStatus("complete");
 				task.setCompleted_at(LocalDateTime.now());
 				task = updateTask(task);
-				//sqs queue
+                sendMessage(System.getenv("TaskCompleteNotificationTopic"),"Task Complete",task);
 				return task;
             } catch (JsonProcessingException e) {
                 throw new RuntimeException(e);
@@ -364,7 +374,7 @@ public class UserserviceApplication {
     public Function<APIGatewayProxyRequestEvent,Task> comment() {
         return (request) -> {
             try {
-                Task task = objectMapper.readValue(request.getBody(),Task.class);
+                Task task = objectMapper().readValue(request.getBody(),Task.class);
 				task = updateTask(task);
 				return task;
             } catch (JsonProcessingException e) {
@@ -377,9 +387,9 @@ public class UserserviceApplication {
 	public Function<APIGatewayProxyRequestEvent,Task> reassignTask() {
 		return (request) -> {
 			try {
-				Task task = objectMapper.readValue(request.getBody(),Task.class);
+				Task task = objectMapper().readValue(request.getBody(),Task.class);
 				task = updateTask(task);
-				//sqs queue
+                sendMessage(System.getenv("TaskAssignmentNotificationTopic"),"This task has been reassigned to you",task);
 				return task;
 			} catch (JsonProcessingException e) {
 				throw new RuntimeException(e);
@@ -391,10 +401,10 @@ public class UserserviceApplication {
 	public Function<APIGatewayProxyRequestEvent,Task> reopenTask() {
 		return (request) -> {
 			try {
-				Task task = objectMapper.readValue(request.getBody(),Task.class);
+				Task task = objectMapper().readValue(request.getBody(),Task.class);
 				task.setStatus("open");
-				task = updateTask(task);
-				//sqs queue
+				updateTask(task);
+				sendMessage(System.getenv("ReopenedTaskNotificationTopic"),"Task Reopened",task);
 				return task;
 			} catch (JsonProcessingException e) {
 				throw new RuntimeException(e);
@@ -417,7 +427,7 @@ public class UserserviceApplication {
 		if(task.getDeadline() != null) {
 			item.put("deadline",AttributeValueUpdate.builder()
 					.value(AttributeValue.builder()
-							.s(task.deadline.toString())
+							.n(String.valueOf(task.getDeadline().toEpochSecond(ZoneOffset.UTC)))
 							.build())
 					.build()
 			);
@@ -459,9 +469,12 @@ public class UserserviceApplication {
 	public Function<APIGatewayProxyRequestEvent,Object> listTasks () {
 		return (request) -> {
             try {
-				String idToken = objectMapper.readValue(request.getBody(), AuthRequest.class).getId();
+				String idToken = objectMapper().readValue(request.getBody(), AuthRequest.class).getId();
 				DecodedJWT jwt =JWT.decode(idToken);
-				boolean isAdmin = !Arrays.stream(jwt.getClaims().get("cognito:groups").asArray(String.class)).toList().isEmpty();
+				boolean isAdmin = false;
+				if(jwt.getClaims().containsKey("cognito:groups")) {
+					isAdmin = !Arrays.stream(jwt.getClaims().get("cognito:groups").asArray(String.class)).toList().isEmpty();
+				}
                 String email = jwt.getClaims().get("email").asString();
 				ScanRequest scanRequest;
 				if(isAdmin){
@@ -471,25 +484,74 @@ public class UserserviceApplication {
 				} else {
 					scanRequest = ScanRequest.builder()
 							.tableName(System.getenv("TASK_TABLE"))
-							.filterExpression("email = :emailValue")
+							.filterExpression("responsibility = :emailValue")
 							.expressionAttributeValues(Map.of(
 									":emailValue", AttributeValue.builder().s(email).build()
 							))
 							.build();
 				}
 				ScanResponse response = dynamoDbClient().scan(scanRequest);
-				return response.items();
+				return response.items().stream().map(this::attributeValueMapper).toList();
             } catch (JsonProcessingException e) {
                 throw new RuntimeException(e);
             }
-
 		};
 	}
 
+	private Task attributeValueMapper(Map<String, AttributeValue> map) {
+        logger.info("mapping");
+		Task.TaskBuilder builder = Task.builder()
+                .id(map.get("id").n())
+                .name(map.get("name").s())
+                .description(map.get("description").s())
+                .status(map.get("status").s())
+                .deadline(LocalDateTime.ofEpochSecond(Long.parseLong(map.get("deadline").n()),0,ZoneOffset.UTC))
+                .responsibility(map.get("responsibility").s());
+        logger.info("passed here");
+		if(!map.get("completed_at").s().isEmpty() && map.get("completed_at").s() != null) {
+            builder.completed_at(LocalDateTime.parse(map.get("completed_at").s()));
+        }
+		logger.info("success");
+        if(!map.get("comment").s().isEmpty() && map.get("comment").s() != null) {
+            builder.comment(map.get("comment").s());
+        } else {
+			builder.comment("No Comment");
+		}
+		logger.info("even more success");
+		return builder.build();
+	}
+
 	@Bean
-	public Function<ScheduledEvent,Task> checkDeadlines () {
+	public Function<ScheduledEvent,Object> checkDeadlines () {
 		return (request) -> {
-			return new Task();
+            long currentTime = LocalDateTime.now().toEpochSecond(ZoneOffset.UTC);
+            ScanRequest expiredRequest = ScanRequest.builder()
+                    .tableName(System.getenv("TASK_TABLE"))
+                    .filterExpression("deadline > :deadline AND status = open")
+                    .expressionAttributeValues(Map.of(
+                            ":deadline", AttributeValue.builder().n(String.valueOf(LocalDateTime.now().toEpochSecond(ZoneOffset.UTC))).build()
+                    ))
+                    .build();
+            ScanRequest approachingDeadlineRequest = ScanRequest.builder()
+                    .tableName(System.getenv("TASK_TABLE"))
+                    .filterExpression("deadline BETWEEN :after AND :before AND status = open")
+                    .expressionAttributeValues(Map.of(
+                            ":after", AttributeValue.builder().n(String.valueOf(currentTime)).build(),
+                            ":before", AttributeValue.builder().n(String.valueOf(currentTime+1800)).build()
+                    ))
+                    .build();
+            ScanResponse expiredResponse = dynamoDbClient().scan(expiredRequest);
+            List<Task> expiredTasks = expiredResponse.items().stream().map(this::attributeValueMapper).toList();
+            List<Task> tasksApproachingDeadline = expiredResponse.items().stream().map(this::attributeValueMapper).toList();
+            expiredTasks.forEach((task) -> {
+                task.setStatus("expired");
+                updateTask(task);
+                sendMessage(System.getenv("ClosedTaskNotificationTopic"),"Deadline Exceeded",task);
+            });
+            tasksApproachingDeadline.forEach((task) -> {
+                sendMessage(System.getenv("TaskDeadlineNotificationTopic"),"Approaching Deadline",task);
+            });
+            return null;
 		};
 	}
 
@@ -514,15 +576,20 @@ public class UserserviceApplication {
 							.messageAttributes(attributes)
 							.build();
 					PublishResponse result = snsClient().publish(publishRequest);
+					DeleteMessageRequest deleteMessageRequest = DeleteMessageRequest.builder()
+							.queueUrl(System.getenv("QUEUE_URL"))
+							.receiptHandle(msg.getReceiptHandle())
+							.build();
+					sqsClient().deleteMessage(deleteMessageRequest);
 					System.out
 							.println(result.messageId() + " Message sent. Status is " + result.sdkHttpResponse().statusCode());
 				});
-				return new Task();
+				return Task.builder().build();
 			} catch (SnsException e) {
 				logger.info(e.getMessage());
 				System.err.println(e.awsErrorDetails().errorMessage());
 			}
-            return new Task();
+			return Task.builder().build();
 		};
 		//based on the task change
 	}

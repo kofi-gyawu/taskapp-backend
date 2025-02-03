@@ -35,7 +35,7 @@ Resources:
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true
         InviteMessageTemplate:
-          EmailMessage: "Hello, {username}. this is your temporary password: {####} , use this link to sign in: https://sam-app-sam-app.auth.eu-central-1.amazoncognito.com/login?client_id=6f6vrq6b2o1gt90fj9tisses1r&redirect_uri=http://localhost:3000/callback&response_type=token"
+          EmailMessage: "Hello, {username}. this is your temporary password: {####} , use this link to sign in: https://sam-app-sam-app.auth.eu-central-1.amazoncognito.com/login?client_id=6f6vrq6b2o1gt90fj9tisses1r&redirect_uri=http://localhost:4200/callback&response_type=token"
           EmailSubject: "Taskapp Credentials"
       Policies:
         PasswordPolicy:
@@ -114,8 +114,8 @@ Resources:
         - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
       CallbackURLs:
-        - http://localhost:3000/callback
-        - https://main.d2999je8ebi5mc.amplifyapp.com/
+        - http://localhost:4200/callback
+        - https://main.d2999je8ebi5mc.amplifyapp.com/callback
 
   CognitoIdentityPool:
     Type: AWS::Cognito::IdentityPool
@@ -150,7 +150,7 @@ Resources:
                 Action:
                   - 'execute-api:Invoke'
                 Resource:
-                  - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ServerlessHttpApi}/*/GET/task
+                  - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ServerlessHttpApi}/*/POST/tasks
                   - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ServerlessHttpApi}/*/POST/task/comment
                   - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ServerlessHttpApi}/*/PATCH/task/complete
 
@@ -414,8 +414,8 @@ Resources:
           Properties:
             Auth:
               Authorizer: AWS_IAM
-            Path: /task
-            Method: GET
+            Path: /tasks
+            Method: POST
 
   CompleteTask:
     Type: AWS::Serverless::Function
@@ -430,10 +430,18 @@ Resources:
         - AWSLambdaBasicExecutionRole
         - DynamoDBCrudPolicy:
             TableName: !Ref TaskTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sqs:SendMessage
+                - sqs:GetQueueUrl
+              Resource:
+                - !GetAtt TaskQueue.Arn
       Environment:
         Variables:
           MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
           TASK_TABLE: !Ref TaskTable
+          TaskCompleteNotificationTopic: !Ref TaskCompleteNotificationTopic
       Events:
         Api:
           Type: HttpApi
@@ -456,10 +464,18 @@ Resources:
         - AWSLambdaBasicExecutionRole
         - DynamoDBCrudPolicy:
             TableName: !Ref TaskTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sqs:SendMessage
+                - sqs:GetQueueUrl
+              Resource:
+                - !GetAtt TaskQueue.Arn
       Environment:
         Variables:
           MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
           TASK_TABLE: !Ref TaskTable
+          TaskAssignmentNotificationTopic: !Ref TaskAssignmentNotificationTopic
       Events:
         Api:
           Type: HttpApi
@@ -482,10 +498,19 @@ Resources:
         - AWSLambdaBasicExecutionRole
         - DynamoDBCrudPolicy:
             TableName: !Ref TaskTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sqs:SendMessage
+                - sqs:GetQueueUrl
+              Resource:
+                - !GetAtt TaskQueue.Arn
       Environment:
         Variables:
           MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
           TASK_TABLE: !Ref TaskTable
+          TASK_QUEUE: !GetAtt TaskQueue.QueueName
+          ReopenedTasksNotificationTopic: !Ref ReopenedTasksNotificationTopic
       Events:
         Api:
           Type: HttpApi
@@ -518,6 +543,13 @@ Resources:
                 - !Ref TaskDeadlineNotificationTopic
                 - !Ref ClosedTaskNotificationTopic
                 - !Ref ReopenedTasksNotificationTopic
+                - !Ref TaskCompleteNotificationTopic
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sqs:DeleteMessage
+              Resource:
+                - !GetAtt TaskQueue.Arn
       Environment:
         Variables:
           MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
@@ -527,6 +559,8 @@ Resources:
           TaskDeadlineNotificationTopic: !Ref TaskDeadlineNotificationTopic
           ClosedTaskNotificationTopic: !Ref ClosedTaskNotificationTopic
           ReopenedTasksNotificationTopic: !Ref ReopenedTasksNotificationTopic
+          TaskCompleteNotificationTopic: !Ref TaskCompleteNotificationTopic
+          QUEUE_URL: !GetAtt TaskQueue.QueueUrl
           LOG_LEVEL: INFO
       Events:
         SQSEvent:
@@ -548,15 +582,25 @@ Resources:
         - AWSLambdaBasicExecutionRole
         - DynamoDBCrudPolicy:
             TableName: !Ref TaskTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sqs:SendMessage
+                - sqs:GetQueueUrl
+              Resource:
+                - !GetAtt TaskQueue.Arn
       Environment:
         Variables:
           MAIN_CLASS: com.awsmicroservices.userservice.UserserviceApplication
           TASK_TABLE: !Ref TaskTable
+          TASK_QUEUE: !GetAtt TaskQueue.QueueName
+          TaskDeadlineNotificationTopic: !Ref TaskDeadlineNotificationTopic
+          ClosedTaskNotificationTopic: !Ref ClosedTaskNotificationTopic
       Events:
         Schedule:
           Type: ScheduleV2
           Properties:
-            ScheduleExpression: 'rate(30 minutes)'
+            ScheduleExpression: 'rate(15 minutes)'
             Name: CheckExpiredDeadlines
 
   MakeComment:
